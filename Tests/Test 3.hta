@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>FakeMac OS</title>
+  <HTA:APPLICATION
+    ID="FakeMacOS"
+    APPLICATIONNAME="FakeMac OS"
+    BORDER="none"
+    CAPTION="yes"
+    SHOWINTASKBAR="yes"
+    SINGLEINSTANCE="yes"
+    SYSMENU="yes"
+    WINDOWSTATE="maximize"    <!-- Real HTA fullscreen -->
+  />
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; font-family:Arial,sans-serif }
+    body {
+      background: url("https://4kwallpapers.com/images/walls/thumbs_3t/1455.jpg") no-repeat center center fixed;
+      background-size: cover;
+      height:100vh; overflow:hidden;
+      display:flex;
+    }
+
+    /* Vertical Dock */
+    .dock {
+      width: 80px;
+      background: rgba(0,0,0,0.3);
+      display:flex; flex-direction:column; align-items:center;
+      padding-top:10px;
+    }
+    .dock-button {
+      width:128px; height:128px;
+      margin:5px 0;
+      background:#555; color:#fff;
+      text-align:center; line-height:128px;
+      cursor:pointer; border-radius:10px;
+      font-size:14px; overflow:hidden;
+    }
+    .dock-button:hover { background:#0077cc }
+
+    /* Content area */
+    .content {
+      flex:1; position:relative; overflow:auto; padding:10px;
+    }
+
+    /* Window */
+    .window {
+      border:2px solid #999; background:#fff; border-radius:5px;
+      box-shadow:0 2px 8px rgba(0,0,0,0.2);
+      display:none; flex-direction:column;
+      position:absolute; top:50px; left:100px;
+      width:600px; height:400px;
+    }
+    .window-header {
+      background:#bbb; padding:5px;
+      display:flex; justify-content:space-between;
+    }
+    .window-buttons button {
+      margin-left:5px; cursor:pointer;
+    }
+    textarea { flex:1; width:100%; resize:none; padding:5px; }
+    .import-export-buttons {
+      padding:5px; background:#eee; text-align:right;
+    }
+    .import-export-buttons button {
+      margin-left:5px; cursor:pointer; padding:5px 10px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Dock -->
+  <div class="dock">
+    <div class="dock-button" onclick="openApp('textEditor')">TextEditor</div>
+    <div class="dock-button" onclick="openApp('finder')">Finder</div>
+    <div class="dock-button" onclick="shutdownSystem()">Shutdown</div>
+  </div>
+
+  <!-- App area -->
+  <div class="content">
+    <!-- Text Editor -->
+    <div id="textEditor" class="window">
+      <div class="window-header">
+        <span>Text Editor</span>
+        <div class="window-buttons">
+          <button onclick="closeApp('textEditor')">X</button>
+        </div>
+      </div>
+      <textarea id="editorText"></textarea>
+      <div class="import-export-buttons">
+        <button onclick="importFile()">Import</button>
+        <button onclick="exportFile()">Export</button>
+        <button onclick="renameFile()">Rename</button>
+        <button onclick="saveFile()">Save</button>
+      </div>
+    </div>
+
+    <!-- Finder -->
+    <div id="finder" class="window">
+      <div class="window-header">
+        <span>Finder</span>
+        <div class="window-buttons">
+          <button onclick="closeApp('finder')">X</button>
+        </div>
+      </div>
+      <div id="finderList" style="padding:10px; overflow:auto; flex:1;"></div>
+    </div>
+  </div>
+
+  <script type="text/javascript">
+    var files = [];
+
+    function openApp(id) {
+      var wins = document.getElementsByClassName('window');
+      for (var i=0; i<wins.length; i++) wins[i].style.display = 'none';
+      var w = document.getElementById(id);
+      if (w) w.style.display = 'flex';
+      if (id === 'finder') refreshFinder();
+    }
+
+    function closeApp(id) {
+      var w = document.getElementById(id);
+      if (w) w.style.display = 'none';
+    }
+
+    function saveFile() {
+      var name = prompt('Filename:', 'Untitled.txt');
+      if(!name) return;
+      files.push({ name: name, content: document.getElementById('editorText').value });
+      alert('Saved in app.');
+    }
+
+    function renameFile() {
+      if(!files.length) return alert('No files to rename');
+      var idx = files.length - 1;
+      var newName = prompt('New name:', files[idx].name);
+      if (newName) files[idx].name = newName;
+    }
+
+    function exportFile() {
+      alert('Export not implemented');
+    }
+
+    function importFile() {
+      alert('Import not implemented');
+    }
+
+    function refreshFinder() {
+      var div = document.getElementById('finderList');
+      div.innerHTML = '';
+      for (var i=0; i<files.length; i++) {
+        (function(i){
+          var f = files[i];
+          var row = document.createElement('div');
+          row.style.marginBottom = '5px';
+          row.innerHTML = f.name +
+            ' <button onclick="makeLocal('+i+')">Make Local</button>' +
+            ' <button onclick="deleteFile('+i+')">Delete</button>';
+          div.appendChild(row);
+        })(i);
+      }
+    }
+
+    function deleteFile(i) {
+      files.splice(i,1);
+      refreshFinder();
+    }
+
+    function makeLocal(i) {
+      var fso = new ActiveXObject('Scripting.FileSystemObject');
+      var file = fso.CreateTextFile(files[i].name, true);
+      file.Write(files[i].content);
+      file.Close();
+      alert('Saved locally.');
+    }
+
+    function shutdownSystem() {
+      window.close();
+    }
+  </script>
+</body>
+</html>
