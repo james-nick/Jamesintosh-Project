@@ -1,6 +1,6 @@
 # Jamesintosh-Project (I am a student so I cannot work on it much)
 
-A "operating system" in html code which is madei in notepad. Very small size as well as very little skill :(
+An "operating system" in very simple code which is made in notepad. Very small size as well as very little skill :(
 
 Official project name:
 FakeMac Interface Project
