@@ -1,6 +1,6 @@
 # Jamesintosh-Project (I am a student so I cannot work on it much)
 
-An "operating system" taht is more like an app.
+An "operating system" using html which is more like an app.
 
 Official project name:
 FakeMac Interface Project
