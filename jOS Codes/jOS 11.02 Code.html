@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+ <html lang="en">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>jOS Startup</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.css">
+  <style>
+    /* --- Base Styles & Font --- */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+    }
+
+    /* --- Body & Wallpaper --- */
+    body {
+      height: 100vh;
+      background-color: #000; /* Start with black for boot screen */
+      /* Light Mode Wallpaper set via JS after boot */
+      background-size: cover;
+      background-position: center center;
+      overflow: hidden;
+      cursor: default;
+      transition: background-image 0.3s ease-in-out;
+      display: flex; /* Use flex for boot screen centering */
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* --- Boot Screen --- */
+    #boot-screen {
+        display: flex; /* Initially visible */
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+        position: fixed;
+        top: 0;
+        left: 0;
+        background-color: #000; /* Black background */
+        z-index: 9999; /* Highest index */
+        opacity: 1;
+        transition: opacity 0.5s ease-out; /* Fade out transition */
+    }
+    #boot-screen .boot-logo {
+        font-size: 80px; /* Large logo */
+        color: #f0f0f0; /* Light grey logo */
+        margin-bottom: 40px; /* Space below logo */
+    }
+    .loading-bar-container {
+        width: 250px; /* Width of the loading bar */
+        height: 5px; /* Thin bar */
+        background-color: #444; /* Dark grey background */
+        border-radius: 3px;
+        overflow: hidden; /* Clip the inner bar */
+        margin-bottom: 20px; /* Space below bar */
+    }
+    .loading-bar-progress {
+        width: 0%; /* Start at 0 width */
+        height: 100%;
+        background-color: #f0f0f0; /* Light grey progress */
+        border-radius: 3px;
+        transition: width 0.1s linear; /* Smooth progress animation */
+    }
+     #boot-screen .boot-text {
+        font-size: 14px;
+        color: #aaa; /* Grey text */
+        margin-top: 10px; /* Space above text */
+    }
+
+
+    /* --- Main UI Elements (Initially Hidden) --- */
+    .menubar, .dock-container, .desktop-app-container, .window, .context-menu {
+        display: none; /* Hide main UI initially */
+        opacity: 0; /* Start fully transparent */
+        transition: opacity 0.5s ease-in; /* Fade in transition */
+    }
+    .ui-visible .menubar,
+    .ui-visible .dock-container,
+    .ui-visible .desktop-app-container,
+    /* Keep windows hidden until opened, but allow container to fade */
+    .ui-visible .context-menu {
+        display: flex; /* Or block/grid as appropriate */
+        opacity: 1;
+    }
+     /* Special handling for windows - they stay display:none until opened by JS */
+     .ui-visible .window {
+         opacity: 1; /* Allow windows to fade in when display is set to block/flex by JS */
+     }
+
+
+    /* --- Dark Mode --- */
+    body.dark-mode {
+        background-image: url("https://wallpapercave.com/wp/wp7728680.jpg");
+        color-scheme: dark;
+    }
+    body.dark-mode .menubar {
+        background-color: rgba(30, 30, 30, 0.3); color: #eee; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+    }
+    body.dark-mode .menubar .right-items img { filter: invert(100%); opacity: 0.8; }
+    body.dark-mode .dock-container {
+        background-color: rgba(50, 50, 50, 0.3); border-color: rgba(80, 80, 80, 0.5); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    }
+    body.dark-mode .dock-item::after { background-color: rgba(255, 255, 255, 0.7); }
+    body.dark-mode .window {
+        background-color: rgba(45, 45, 45, 0.8); border-color: rgba(70, 70, 70, 0.5); box-shadow: 0 15px 40px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255,255,255,0.1);
+    }
+     body.dark-mode .window.focused { box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255,255,255,0.15); }
+    body.dark-mode .window-header { background-color: rgba(60, 60, 60, 0.8); border-bottom-color: rgba(80, 80, 80, 0.7); }
+    body.dark-mode .window-title { color: #ddd; }
+    body.dark-mode .finder-window .sidebar { background-color: rgba(55, 55, 55, 0.8); border-right-color: rgba(80, 80, 80, 0.7); }
+    body.dark-mode .sidebar-title { color: #aaa; }
+    body.dark-mode .sidebar-item { color: #ccc; }
+    body.dark-mode .sidebar-item:hover { background-color: rgba(255, 255, 255, 0.06); }
+    body.dark-mode .sidebar-item.active { background-color: rgba(0, 122, 255, 0.25); color: #5dadee; }
+    body.dark-mode .finder-app .app-name { color: #ddd; text-shadow: none; }
+    body.dark-mode .desktop-app .app-name { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.8); background-color: rgba(255,255,255,0.05); }
+    body.dark-mode .app-name.editing { background-color: #333; color: #eee; border-color: #007aff; }
+    body.dark-mode .context-menu { background-color: rgba(50, 50, 50, 0.85); border-color: rgba(90, 90, 90, 0.5); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.5); }
+    body.dark-mode .context-menu-item { color: #ddd; }
+    body.dark-mode .context-menu-item:hover { background-color: #007aff; color: #fff; }
+    body.dark-mode .context-menu-separator { background-color: rgba(255, 255, 255, 0.1); }
+    body.dark-mode .browser-controls { background-color: rgba(60, 60, 60, 0.8); border-bottom-color: rgba(80, 80, 80, 0.7); }
+    body.dark-mode .browser-controls .back-button, body.dark-mode .browser-controls .forward-button, body.dark-mode .browser-controls .refresh-button { color: #bbb; }
+    body.dark-mode .browser-controls .back-button:hover, body.dark-mode .browser-controls .forward-button:hover, body.dark-mode .browser-controls .refresh-button:hover { background-color: rgba(255,255,255,0.1); }
+    body.dark-mode .browser-controls .address-bar { background-color: rgba(30, 30, 30, 0.8); border-color: rgba(90, 90, 90, 0.7); color: #eee; box-shadow: inset 0 1px 1px rgba(0,0,0,0.2); }
+    body.dark-mode .browser-controls .address-bar:focus { border-color: #007aff; box-shadow: inset 0 1px 1px rgba(0,0,0,0.2), 0 0 0 2px rgba(0, 122, 255, 0.3); }
+    body.dark-mode iframe { background-color: #333; }
+    body.dark-mode .music-window .window-content { background: linear-gradient(to bottom, rgba(60, 60, 60, 0.8), rgba(45, 45, 45, 0.8)); }
+    body.dark-mode .music-title { color: #eee; } body.dark-mode .music-artist { color: #aaa; } body.dark-mode .music-control-button { color: #aaa; } body.dark-mode .music-control-button:hover { color: #eee; }
+    body.dark-mode .app-store-window .window-content { background-color: rgba(35, 35, 35, 0.8); }
+    body.dark-mode .app-store-app { background-color: rgba(55, 55, 55, 0.8); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+    body.dark-mode .app-store-title { color: #eee; } body.dark-mode .app-store-subtitle { color: #aaa; } body.dark-mode .loading-progress { background-color: #444; }
+    body.dark-mode .system-prefs-window .window-content { background-color: rgba(50, 50, 50, 0.8); }
+    body.dark-mode .system-prefs-window .prefs-pane-title { color: #ddd; } body.dark-mode .system-prefs-window .prefs-section-title { color: #bbb; }
+    body.dark-mode .system-prefs-window .mode-button { background-color: #444; border-color: #666; }
+    body.dark-mode .system-prefs-window .mode-button.active { border-color: #007aff; box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.3); }
+    body.dark-mode .system-prefs-window .mode-button .mode-preview-light { background-color: #aaa; } body.dark-mode .system-prefs-window .mode-button .mode-preview-dark { background-color: #ddd; } body.dark-mode .system-prefs-window .mode-label { color: #ccc; }
+
+
+    /* --- Menu Bar --- */
+    .menubar {
+      height: 25px; background-color: rgba(255, 255, 255, 0.2); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);
+      display: flex; align-items: center; padding: 0 15px; color: #333; font-size: 13px; font-weight: 500;
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+      transition: background-color 0.3s ease-in-out, color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+    }
+    .menubar .command-logo { margin-right: 20px; font-weight: bold; font-size: 16px; line-height: 1; }
+    .menubar .menu-item { margin-right: 18px; cursor: pointer; padding: 2px 5px; border-radius: 4px; transition: background-color 0.1s ease-in-out; }
+    .menubar .menu-item:hover { background-color: rgba(0, 0, 0, 0.1); }
+    .menubar .right-items { margin-left: auto; display: flex; align-items: center; }
+    .menubar .right-items > div, .menubar .right-items > img { margin-left: 12px; cursor: pointer; display: flex; align-items: center; }
+    .menubar .right-items img { height: 15px; opacity: 0.8; transition: filter 0.3s ease-in-out; }
+
+    /* --- Dock --- */
+    .dock-container {
+      position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%); background-color: rgba(255, 255, 255, 0.25);
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 20px; padding: 6px; display: flex;
+      align-items: flex-end; z-index: 1000; height: 75px; border: 0.5px solid rgba(255, 255, 255, 0.3);
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+      transition: background-color 0.3s ease-in-out, border-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+    }
+    .dock-item {
+      width: 60px; height: 60px; margin: 0 5px; border-radius: 15px; background-color: rgba(200, 200, 200, 0.5);
+      background-size: cover; background-position: center; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      transition: all 0.1s ease-out; cursor: pointer; position: relative; display: flex; align-items: center; justify-content: center;
+      color: white; font-size: 26px; font-weight: bold; text-shadow: 1px 1px 3px rgba(0,0,0,0.4);
+    }
+    .dock-item:hover { transform: scale(1.35) translateY(-12px); margin: 0 12px; }
+    .dock-item:hover + .dock-item { transform: scale(1.15) translateY(-7px); margin-left: 10px; }
+    .dock-item:has(+ .dock-item:hover) { transform: scale(1.15) translateY(-7px); margin-right: 10px; }
+    .dock-item::after {
+      content: ""; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px;
+      border-radius: 50%; background-color: rgba(0, 0, 0, 0.5); opacity: 0;
+      transition: opacity 0.2s ease, background-color 0.3s ease-in-out;
+    }
+    .dock-item.active::after { opacity: 1; }
+
+    /* --- Specific App Icon Styles --- */
+    .finder { background-color: #1e88e5; } .safari { background: linear-gradient(45deg, #0fb9ff, #1aa0ff); } .messages { background: linear-gradient(45deg, #30d15a, #2cc755); } .mail { background: linear-gradient(45deg, #3497f9, #2d89e6); } .music { background: linear-gradient(45deg, #fc3c5f, #f53356); } .photos { background: linear-gradient(45deg, #ff9f0a, #f5970a); } .app-store { background: linear-gradient(45deg, #40c8ff, #3abeff); } .system-prefs { background: #e0e0e0; color: #666; text-shadow: none; }
+    .chrome { background: radial-gradient(circle at 50% 50%, #4285f4 28%, transparent 29%), conic-gradient(from 180deg at 50% 50%, #ea4335 0deg 90deg, #fbbc05 90deg 180deg, #34a853 180deg 270deg, #4285f4 270deg 360deg); color: white; font-size: 0; text-shadow: none; position: relative; }
+    .chrome div.chrome-inner { width: 55%; height: 55%; background-color: #4285f4; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+
+    /* --- Windows --- */
+    .window {
+      position: absolute; top: 60px; left: 100px; width: 800px; height: 500px; background-color: rgba(255, 255, 255, 0.75);
+      backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px); border-radius: 12px;
+      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(0,0,0,0.1); overflow: hidden; /* display: none; set by JS */
+      z-index: 100; resize: both; min-width: 300px; min-height: 200px; border: 0.5px solid rgba(0, 0, 0, 0.15);
+      transition: background-color 0.3s ease-in-out, border-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+    }
+    .window.focused { box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0,0,0,0.2); }
+    .window-header {
+      display: flex; align-items: center; height: 38px; padding: 0 12px; background-color: rgba(240, 240, 240, 0.7);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.1); cursor: move; position: relative;
+      transition: background-color 0.3s ease-in-out, border-bottom-color 0.3s ease-in-out;
+    }
+    .window-controls { display: flex; align-items: center; position: relative; z-index: 1; }
+    .window-control { width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; cursor: pointer; border: 0.5px solid rgba(0,0,0,0.15); transition: filter 0.1s ease; }
+    .window-control:hover { filter: brightness(1.1); }
+    .window-control.close { background-color: #ff5f57; } .window-control.minimize { background-color: #ffbd2e; } .window-control.maximize { background-color: #28c940; }
+    .window-title {
+      position: absolute; left: 70px; right: 70px; text-align: center; font-size: 13px; color: #444; font-weight: 500;
+      line-height: 38px; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      transition: color 0.3s ease-in-out;
+    }
+    .window-content {
+      padding: 0; height: calc(100% - 38px); display: flex; flex-direction: column; overflow: auto;
+      transition: background-color 0.3s ease-in-out;
+    }
+
+    /* --- Finder Window --- */
+    .finder-window .window-content { flex-direction: row; }
+    .finder-window .sidebar {
+      width: 180px; background-color: rgba(235, 235, 240, 0.7); height: 100%; padding: 10px 0px; border-right: 1px solid rgba(0, 0, 0, 0.1);
+      flex-shrink: 0; overflow-y: auto; transition: background-color 0.3s ease-in-out, border-right-color 0.3s ease-in-out;
+    }
+    .sidebar-section { margin-bottom: 15px; }
+    .sidebar-title { font-size: 11px; color: #777; font-weight: 600; margin-bottom: 5px; padding: 0 15px; text-transform: uppercase; transition: color 0.3s ease-in-out; }
+    .sidebar-item { display: flex; align-items: center; padding: 6px 15px; border-radius: 0; margin-bottom: 1px; font-size: 13px; color: #333; cursor: pointer; transition: background-color 0.1s ease, color 0.3s ease-in-out; }
+    .sidebar-item:hover { background-color: rgba(0, 0, 0, 0.04); }
+    .sidebar-item-icon { width: 18px; height: 18px; border-radius: 4px; margin-right: 10px; flex-shrink: 0; background-color: #a8a8b0; display: flex; align-items: center; justify-content: center; }
+    .sidebar-item.active { background-color: rgba(0, 122, 255, 0.15); color: #006ee6; font-weight: 500; }
+    #finder-content { flex: 1; padding: 15px; display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 20px; align-content: flex-start; overflow-y: auto; }
+
+    /* --- Browser Windows --- */
+    iframe { width: 100%; height: 100%; border: none; background-color: #fff; transition: background-color 0.3s ease-in-out; }
+    .browser-controls { display: flex; align-items: center; padding: 8px 12px; background-color: rgba(230, 230, 230, 0.8); border-bottom: 1px solid rgba(0, 0, 0, 0.1); transition: background-color 0.3s ease-in-out, border-bottom-color 0.3s ease-in-out; }
+    .browser-controls .back-button, .browser-controls .forward-button, .browser-controls .refresh-button { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; margin-right: 6px; border-radius: 5px; background-color: transparent; color: #555; font-size: 18px; cursor: pointer; transition: background-color 0.15s ease, color 0.3s ease-in-out; }
+    .browser-controls .back-button:hover, .browser-controls .forward-button:hover, .browser-controls .refresh-button:hover { background-color: rgba(0,0,0,0.08); }
+    .browser-controls .address-bar { flex: 1; background-color: rgba(255, 255, 255, 0.8); border: 1px solid rgba(0,0,0,0.15); border-radius: 6px; padding: 5px 12px; margin: 0 10px; font-size: 13px; color: #333; box-shadow: inset 0 1px 1px rgba(0,0,0,0.05); outline: none; transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.3s ease-in-out, color 0.3s ease-in-out; }
+    .browser-controls .address-bar:focus { border-color: #007aff; box-shadow: inset 0 1px 1px rgba(0,0,0,0.05), 0 0 0 2px rgba(0, 122, 255, 0.2); }
+    .browser-content { flex: 1; display: flex; }
+
+    /* --- App Icons --- */
+    .desktop-app-container { position: absolute; top: 40px; right: 15px; bottom: 85px; width: 110px; display: flex; flex-direction: column; align-items: center; padding: 10px 0; overflow-y: auto; }
+    .desktop-app, .finder-app { display: flex; flex-direction: column; align-items: center; width: 90px; margin-bottom: 15px; position: relative; padding: 5px; border-radius: 5px; cursor: pointer; transition: background-color 0.1s ease; }
+    .desktop-app:hover, .finder-app:hover { background-color: rgba(0, 0, 0, 0.05); }
+    .desktop-app:focus-within, .finder-app:focus-within { background-color: rgba(0, 122, 255, 0.15); outline: none; }
+    .app-icon { width: 64px; height: 64px; border-radius: 16px; margin-bottom: 6px; display: flex; align-items: center; justify-content: center; font-size: 28px; color: #fff; cursor: pointer; position: relative; background-size: cover; background-position: center; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+    .app-name { font-size: 12px; text-align: center; padding: 2px 5px; border-radius: 3px; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 0.3s ease-in-out, text-shadow 0.3s ease-in-out, background-color 0.3s ease-in-out; }
+    .desktop-app .app-name { color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.6); background-color: rgba(0,0,0,0.1); }
+    .finder-app .app-name { color: #333; text-shadow: none; }
+    .app-name.editing { background-color: #fff; border: 1px solid #007aff; color: #000; text-shadow: none; outline: none; white-space: normal; z-index: 1; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+
+    /* --- Context Menu --- */
+    .context-menu { position: absolute; width: 200px; background-color: rgba(255, 255, 255, 0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 8px; box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2); padding: 6px 0; z-index: 1500; /* display: none; set by JS */ border: 0.5px solid rgba(0,0,0,0.15); transition: background-color 0.3s ease-in-out, border-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out; }
+    .context-menu-item { padding: 7px 18px; font-size: 13px; cursor: default; color: #333; white-space: nowrap; transition: color 0.3s ease-in-out; }
+    .context-menu-item:hover { background-color: #007aff; color: #fff; }
+    .context-menu-separator { height: 1px; background-color: rgba(0, 0, 0, 0.1); margin: 5px 0; transition: background-color 0.3s ease-in-out; }
+
+    /* --- Music Window --- */
+    .music-window .window-content { align-items: center; justify-content: center; padding: 20px; background: linear-gradient(to bottom, rgba(250, 250, 250, 0.8), rgba(230, 230, 230, 0.8)); transition: background 0.3s ease-in-out; }
+    .music-album { width: 180px; height: 180px; border-radius: 8px; background-color: #ddd; margin-bottom: 20px; background-image: url('https://via.placeholder.com/180/fc3c5f/ffffff?text=Music'); background-size: cover; box-shadow: 0 5px 15px rgba(0,0,0,0.15); }
+    .music-info { text-align: center; margin-bottom: 25px; }
+    .music-title { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 4px; transition: color 0.3s ease-in-out; }
+    .music-artist { font-size: 14px; color: #666; transition: color 0.3s ease-in-out; }
+    .music-controls { display: flex; align-items: center; justify-content: center; padding: 10px; margin-top: 10px; }
+    .music-control-button { font-size: 24px; color: #555; cursor: pointer; margin: 0 15px; transition: color 0.1s ease; }
+    .music-control-button:hover { color: #111; }
+    .music-play-button { width: 55px; height: 55px; border-radius: 50%; background-color: #fc3c5f; display: flex; align-items: center; justify-content: center; color: white; font-size: 22px; cursor: pointer; margin: 0 15px; border: none; box-shadow: 0 3px 8px rgba(0,0,0,0.2); transition: background-color 0.15s ease, transform 0.1s ease; }
+    .music-play-button:hover { background-color: #e13452; } .music-play-button:active { transform: scale(0.95); }
+
+    /* --- App Store Window --- */
+    .app-store-window .window-content { display: flex; align-items: center; justify-content: center; padding: 20px; background-color: rgba(245, 245, 250, 0.8); transition: background-color 0.3s ease-in-out; }
+    .app-store-app { display: flex; flex-direction: column; align-items: center; width: 320px; padding: 25px; border-radius: 15px; background-color: rgba(255, 255, 255, 0.8); box-shadow: 0 5px 15px rgba(0,0,0,0.08); transition: background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out; }
+    .app-store-icon { width: 90px; height: 90px; border-radius: 20px; background: radial-gradient(circle at 50% 50%, #4285f4 28%, transparent 29%), conic-gradient(from 180deg at 50% 50%, #ea4335 0deg 90deg, #fbbc05 90deg 180deg, #34a853 180deg 270deg, #4285f4 270deg 360deg); color: white; font-size: 0; margin-bottom: 20px; position: relative; }
+    .app-store-icon div.chrome-inner { width: 55%; height: 55%; background-color: #4285f4; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+    .app-store-title { font-size: 20px; font-weight: 600; margin-bottom: 5px; color: #333; transition: color 0.3s ease-in-out;}
+    .app-store-subtitle { font-size: 14px; color: #777; margin-bottom: 20px; transition: color 0.3s ease-in-out;}
+    .app-store-button { padding: 7px 22px; border-radius: 20px; background-color: #007aff; color: white; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: background-color 0.2s ease; min-width: 80px; text-align: center; }
+    .app-store-button:hover { background-color: #005ecb; } .app-store-button:disabled { background-color: #d0d0d5; color: #8e8e93; cursor: default; }
+    .loading-progress { width: 100%; height: 5px; background-color: #e5e5ea; border-radius: 2.5px; margin-top: 15px; overflow: hidden; display: none; transition: background-color 0.3s ease-in-out;}
+    .loading-bar { height: 100%; width: 0%; background-color: #007aff; transition: width 0.3s ease; }
+    .download-complete { color: #34c759; font-size: 13px; margin-top: 15px; display: none; font-weight: 600; }
+
+    /* --- System Preferences Window --- */
+    .system-prefs-window .window-content { padding: 20px; background-color: rgba(240, 240, 245, 0.8); }
+    .prefs-pane-title { font-size: 18px; font-weight: 600; color: #333; margin-bottom: 25px; padding-bottom: 10px; border-bottom: 1px solid rgba(0,0,0,0.1); transition: color 0.3s ease-in-out, border-bottom-color 0.3s ease-in-out; }
+    .prefs-section { margin-bottom: 20px; }
+    .prefs-section-title { font-size: 14px; font-weight: 600; color: #555; margin-bottom: 15px; transition: color 0.3s ease-in-out; }
+    .appearance-options { display: flex; gap: 20px; }
+    .mode-button { display: flex; flex-direction: column; align-items: center; cursor: pointer; padding: 10px; border-radius: 8px; border: 2px solid transparent; background-color: #fff; transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.3s ease-in-out; }
+    .mode-button.active { border-color: #007aff; box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2); }
+    .mode-preview { width: 80px; height: 60px; border-radius: 5px; margin-bottom: 8px; border: 1px solid rgba(0,0,0,0.1); overflow: hidden; display: flex; transition: background-color 0.3s ease-in-out, border-color 0.3s ease-in-out; }
+    .mode-preview-light { width: 100%; height: 100%; background-color: #f0f0f0; }
+    .mode-preview-dark { width: 100%; height: 100%; background-color: #333; }
+    .mode-label { font-size: 13px; color: #333; transition: color 0.3s ease-in-out; }
+
+    /* --- jQuery UI Resizable Handles --- */
+    .ui-resizable-handle { background: rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.2); z-index: 9999; }
+    .ui-resizable-se { width: 12px; height: 12px; right: 2px; bottom: 2px; }
+
+  </style>
+ </head>
+ <body>
+    <div id="boot-screen">
+        <div class="boot-logo">⌘</div>
+        <div class="loading-bar-container">
+            <div class="loading-bar-progress"></div>
+        </div>
+        <div class="boot-text">jOS by Jamesintosh</div>
+    </div>
+
+    <audio id="music-player" src="https://cdn.freesound.org/previews/572/572769_4999502-lq.mp3" loop></audio>
+    <div class="menubar">
+        <div class="command-logo">⌘</div>
+        <div class="menu-item">Finder</div>
+        <div class="menu-item">File</div>
+        <div class="menu-item">Edit</div>
+        <div class="menu-item">View</div>
+        <div class="menu-item">Go</div>
+        <div class="menu-item">Window</div>
+        <div class="menu-item">Help</div>
+        <div class="right-items">
+        <img src="https://img.icons8.com/ios-glyphs/15/333333/wifi--v1.png" alt="Wi-Fi" title="Wi-Fi"/>
+        <div id="current-time">00:00 AM</div>
+        <img src="https://img.icons8.com/ios-glyphs/15/333333/search--v1.png" alt="Search" title="Spotlight"/>
+        <img src="https://img.icons8.com/ios-glyphs/15/333333/control-center.png" alt="Control Center" title="Control Center"/>
+        </div>
+    </div>
+    <div class="desktop-app-container" id="desktop-apps"></div>
+    <div class="window finder-window" id="finder-window">
+        <div class="window-header">
+            <div class="window-controls">
+                <div class="window-control close" data-window="finder-window" title="Close"></div>
+                <div class="window-control minimize" data-window="finder-window" title="Minimize"></div>
+                <div class="window-control maximize" data-window="finder-window" title="Zoom"></div>
+            </div>
+            <div class="window-title">Finder</div>
+        </div>
+        <div class="window-content">
+            <div class="sidebar">
+                <div class="sidebar-section"><div class="sidebar-title">Favorites</div><div class="sidebar-item active"><div class="sidebar-item-icon" style="background-color: #007aff;"></div> AirDrop</div><div class="sidebar-item"><div class="sidebar-item-icon" style="background-color: #fc3c5f;"></div> Recents</div><div class="sidebar-item"><div class="sidebar-item-icon" style="background-color: #30d15a;"></div> Applications</div><div class="sidebar-item"><div class="sidebar-item-icon" style="background-color: #ff9f0a;"></div> Desktop</div><div class="sidebar-item"><div class="sidebar-item-icon" style="background-color: #3497f9;"></div> Documents</div><div class="sidebar-item"><div class="sidebar-item-icon" style="background-color: #1aa0ff;"></div> Downloads</div></div>
+                <div class="sidebar-section"><div class="sidebar-title">iCloud</div><div class="sidebar-item"><div class="sidebar-item-icon" style="background-color: #0fb9ff;"></div> iCloud Drive</div><div class="sidebar-item"><div class="sidebar-item-icon" style="background-color: #a8a8b0;"></div> Shared</div></div>
+                <div class="sidebar-section"><div class="sidebar-title">Tags</div><div class="sidebar-item"><div class="sidebar-item-icon" style="background-color: #ff5f57; border-radius: 50%;"></div> Red</div><div class="sidebar-item"><div class="sidebar-item-icon" style="background-color: #ffbd2e; border-radius: 50%;"></div> Orange</div><div class="sidebar-item"><div class="sidebar-item-icon" style="background-color: #28c940; border-radius: 50%;"></div> Green</div><div class="sidebar-item"><div class="sidebar-item-icon" style="background-color: #007aff; border-radius: 50%;"></div> Blue</div></div>
+            </div>
+            <div id="finder-content"></div>
+        </div>
+    </div>
+    <div class="window" id="safari-window">
+        <div class="window-header"><div class="window-controls"><div class="window-control close" data-window="safari-window" title="Close"></div><div class="window-control minimize" data-window="safari-window" title="Minimize"></div><div class="window-control maximize" data-window="safari-window" title="Zoom"></div></div><div class="window-title">Safari</div></div>
+        <div class="window-content"><div class="browser-controls"><div class="back-button" title="Back" onclick="document.getElementById('safari-frame').contentWindow.history.back();">←</div><div class="forward-button" title="Forward" onclick="document.getElementById('safari-frame').contentWindow.history.forward();">→</div><input class="address-bar" type="text" value="https://eviltester.github.io/TestingApp/apps/iframe-search/iframe-search.html" onchange="document.getElementById('safari-frame').src = this.value" title="Website Address"><div class="refresh-button" title="Reload Page" onclick="document.getElementById('safari-frame').contentWindow.location.reload();">↻</div></div><div class="browser-content"><iframe id="safari-frame" src="https://eviltester.github.io/TestingApp/apps/iframe-search/iframe-search.html" title="Safari Content"></iframe></div></div>
+    </div>
+    <div class="window" id="chrome-window">
+        <div class="window-header"><div class="window-controls"><div class="window-control close" data-window="chrome-window" title="Close"></div><div class="window-control minimize" data-window="chrome-window" title="Minimize"></div><div class="window-control maximize" data-window="chrome-window" title="Zoom"></div></div><div class="window-title">Google Chrome</div></div>
+        <div class="window-content"><div class="browser-controls"><div class="back-button" title="Back" onclick="document.getElementById('chrome-frame').contentWindow.history.back();">←</div><div class="forward-button" title="Forward" onclick="document.getElementById('chrome-frame').contentWindow.history.forward();">→</div><input class="address-bar" type="text" value="https://eviltester.github.io/TestingApp/apps/iframe-search/iframe-search.html" onchange="document.getElementById('chrome-frame').src = this.value" title="Website Address"><div class="refresh-button" title="Reload Page" onclick="document.getElementById('chrome-frame').contentWindow.location.reload();">↻</div></div><div class="browser-content"><iframe id="chrome-frame" src="https://eviltester.github.io/TestingApp/apps/iframe-search/iframe-search.html" title="Chrome Content"></iframe></div></div>
+    </div>
+    <div class="window music-window" id="music-window">
+        <div class="window-header"><div class="window-controls"><div class="window-control close" data-window="music-window" title="Close"></div><div class="window-control minimize" data-window="music-window" title="Minimize"></div><div class="window-control maximize" data-window="music-window" title="Zoom"></div></div><div class="window-title">Music</div></div>
+        <div class="window-content"><div class="music-album"></div><div class="music-info"><div class="music-title">Sample Beat</div><div class="music-artist">Cool Free Sound</div></div><div class="music-controls"><div class="music-control-button" title="Previous">⏮️</div><button class="music-play-button" id="music-play" title="Play">▶</button><div class="music-control-button" title="Next">⏭️</div></div></div>
+    </div>
+    <div class="window app-store-window" id="app-store-window">
+        <div class="window-header"><div class="window-controls"><div class="window-control close" data-window="app-store-window" title="Close"></div><div class="window-control minimize" data-window="app-store-window" title="Minimize"></div><div class="window-control maximize" data-window="app-store-window" title="Zoom"></div></div><div class="window-title">App Store</div></div>
+        <div class="window-content"><div class="app-store-app"><div class="app-store-icon"><div class="chrome-inner"></div></div><div class="app-store-title">Google Chrome</div><div class="app-store-subtitle">The browser built by Google</div><button class="app-store-button" id="install-chrome">GET</button><div class="loading-progress" id="chrome-progress"><div class="loading-bar" id="chrome-loading-bar"></div></div><div class="download-complete" id="chrome-complete">✓ Installed</div></div></div>
+    </div>
+    <div class="window system-prefs-window" id="system-prefs-window">
+        <div class="window-header"><div class="window-controls"><div class="window-control close" data-window="system-prefs-window" title="Close"></div><div class="window-control minimize" data-window="system-prefs-window" title="Minimize"></div><div class="window-control maximize" data-window="system-prefs-window" title="Zoom"></div></div><div class="window-title">System Preferences</div></div>
+        <div class="window-content"><div class="prefs-pane-title">General</div><div class="prefs-section"><div class="prefs-section-title">Appearance</div><div class="appearance-options"><div class="mode-button active" id="light-mode-button" data-mode="light"><div class="mode-preview"><div class="mode-preview-light"></div></div><div class="mode-label">Light</div></div><div class="mode-button" id="dark-mode-button" data-mode="dark"><div class="mode-preview"><div class="mode-preview-dark"></div></div><div class="mode-label">Dark</div></div><div class="mode-button" data-mode="auto" style="opacity: 0.5; cursor: not-allowed;" title="Auto mode not implemented"><div class="mode-preview" style="display: flex;"><div class="mode-preview-light" style="width: 50%;"></div><div class="mode-preview-dark" style="width: 50%;"></div></div><div class="mode-label">Auto</div></div></div></div></div>
+    </div>
+    <div class="context-menu" id="context-menu">
+        <div class="context-menu-item open-item">Open</div><div class="context-menu-separator"></div><div class="context-menu-item rename-item">Rename</div><div class="context-menu-separator"></div><div class="context-menu-item delete-item">Move to Bin</div>
+    </div>
+    <div class="dock-container"></div>
+
+  <script>
+    $(document).ready(function() {
+        // --- Global Variables ---
+        let highestZIndex = 200;
+        let contextTarget = null;
+        let chromeInstalled = false;
+
+        // --- Initial App Data ---
+        const initialApps = [
+             { name: "Finder", icon: "F", iconClass: "finder", windowId: "finder-window", noDesktop: true, dockOrder: 1 },
+             { name: "Safari", icon: "S", iconClass: "safari", windowId: "safari-window", dockOrder: 2 },
+             { name: "Messages", icon: "M", iconClass: "messages", windowId: null, dockOrder: 3 },
+             { name: "Mail", icon: "M", iconClass: "mail", windowId: null, dockOrder: 4 },
+             { name: "Music", icon: "♫", iconClass: "music", windowId: "music-window", dockOrder: 5 },
+             { name: "Photos", icon: "P", iconClass: "photos", windowId: null, dockOrder: 6 },
+             { name: "App Store", icon: "A", iconClass: "app-store", windowId: "app-store-window", dockOrder: 7 },
+             { name: "System Preferences", icon: "⚙️", iconClass: "system-prefs", windowId: "system-prefs-window", dockOrder: 8 }
+        ];
+
+        // --- Boot Sequence ---
+        function startBootSequence() {
+            const $progressBar = $('.loading-bar-progress');
+            const $bootScreen = $('#boot-screen');
+            const $body = $('body');
+            let progress = 0;
+            const bootTime = 2500; // Total boot time in milliseconds
+            const intervalTime = 25; // Update interval
+            const steps = bootTime / intervalTime;
+            const increment = 100 / steps;
+
+            const interval = setInterval(() => {
+                progress += increment;
+                $progressBar.css('width', Math.min(progress, 100) + '%');
+
+                if (progress >= 100) {
+                    clearInterval(interval);
+                    // Wait a moment after loading bar finishes
+                    setTimeout(() => {
+                        $bootScreen.css('opacity', 0); // Start fade out
+                        // Wait for fade out to complete
+                        setTimeout(() => {
+                            $bootScreen.hide(); // Hide boot screen completely
+                            // Set the default wallpaper (light mode)
+                             $body.css('background-image', 'url("https://wallpapercave.com/wp/wp9139426.jpg")');
+                             // Add class to body to trigger UI fade-in
+                             $body.addClass('ui-visible');
+                             // Change title after boot
+                             document.title = "jOS Desktop";
+                             // Run main UI initializations AFTER boot screen is gone
+                             initializeMainUI();
+                        }, 500); // Match fade-out transition duration
+                    }, 300);
+                }
+            }, intervalTime);
+        }
+
+        // --- Main UI Initialization (Called after boot) ---
+        function initializeMainUI() {
+            initializeDock();
+            initializeIcons();
+            makeWindowsInteractive();
+            updateClock();
+            setInterval(updateClock, 10000);
+            setupWindowControls();
+            setupDockInteraction();
+            setupMusicPlayer();
+            setupAppStore();
+            setupContextMenu();
+            setupThemeSwitcher();
+
+            // Open Finder window by default
+            openWindow('finder-window');
+            // Ensure Finder dock item is marked active
+            setActiveDockItem('finder-window');
+        }
+
+
+        // --- Initialization Functions ---
+        function initializeDock() {
+            const $dockContainer = $('.dock-container');
+            $dockContainer.empty();
+            initialApps
+                .filter(app => app.dockOrder)
+                .sort((a, b) => a.dockOrder - b.dockOrder)
+                .forEach(app => addDockItem(app));
+        }
+
+        function initializeIcons() {
+            $('#desktop-apps').empty();
+            $('#finder-content').empty();
+            initialApps.forEach(app => {
+                if (!app.noDesktop) addDesktopApp(app);
+                addFinderApp(app);
+            });
+        }
+
+        function makeWindowsInteractive() {
+            $(".window").draggable({
+                handle: ".window-header", containment: "body", stack: ".window",
+                start: function() { bringToFront($(this)); }, iframeFix: true
+            }).resizable({
+                handles: "n, e, s, w, ne, se, sw, nw", minHeight: 200, minWidth: 300,
+                alsoResizeReverse : ".window-content",
+                start: function() { bringToFront($(this)); $('body').addClass('resizing'); },
+                stop: function() { $('body').removeClass('resizing'); }
+            });
+            $('<style>.resizing * { user-select: none !important; -webkit-user-select: none !important; }</style>').appendTo('head');
+        }
+
+        // --- Clock Update ---
+        function updateClock() {
+            const now = new Date();
+            const options = { hour: 'numeric', minute: '2-digit', hour12: true };
+            $("#current-time").text(now.toLocaleTimeString('en-US', options));
+        }
+
+        // --- Window Management ---
+        function openWindow(windowId, triggerElement) {
+             const $window = $(`#${windowId}`);
+             if (windowId && $window.length) {
+                 // Use flex for windows that need it (like Finder)
+                 if ($window.hasClass('finder-window')) {
+                     $window.css('display', 'flex');
+                 } else {
+                     $window.css('display', 'block'); // Default to block
+                 }
+                 bringToFront($window);
+                 setActiveDockItem(windowId);
+             } else if (triggerElement && triggerElement.hasClass('dock-item')) {
+                 triggerElement.css({ transform: 'translateY(-10px)' });
+                 setTimeout(() => triggerElement.css({ transform: 'translateY(0)' }), 150);
+                 setTimeout(() => triggerElement.css({ transform: 'translateY(-5px)' }), 300);
+                 setTimeout(() => triggerElement.css({ transform: 'translateY(0)' }), 450);
+             }
+        }
+
+        function bringToFront($window) {
+            highestZIndex++;
+            $('.window').removeClass('focused');
+            $window.css("z-index", highestZIndex).addClass('focused');
+        }
+
+        function setActiveDockItem(windowId) {
+             $(".dock-item").removeClass("active");
+             if (windowId) {
+                 $(`.dock-item[data-window="${windowId}"]`).addClass("active");
+             }
+        }
+
+        // --- Window Controls Logic ---
+        function setupWindowControls() {
+            // Use event delegation for controls as windows might be added dynamically
+            $(document).on('click', ".window-control.close", function(e) {
+                 e.stopPropagation();
+                 const windowId = $(this).data("window") || $(this).closest('.window').attr('id');
+                 $(`#${windowId}`).fadeOut(100, function() {
+                    if(windowId !== 'finder-window') { // Keep Finder active dot
+                        $(`.dock-item[data-window="${windowId}"]`).removeClass("active");
+                    }
+                 });
+            });
+
+            $(document).on('click', ".window-control.minimize", function(e) {
+                 e.stopPropagation();
+                 const windowId = $(this).data("window") || $(this).closest('.window').attr('id');
+                 $(`#${windowId}`).fadeOut(100);
+            });
+
+            $(document).on('click', ".window-control.maximize", function(e) {
+                 e.stopPropagation();
+                 const windowId = $(this).data("window") || $(this).closest('.window').attr('id');
+                 const $window = $(`#${windowId}`);
+                 const $menubar = $('.menubar');
+                 const $dock = $('.dock-container');
+                 const topOffset = $menubar.outerHeight() || 25;
+                 const bottomOffset = $dock.outerHeight() || 75;
+
+                 if ($window.data("original-pos")) { // Restore
+                     const pos = $window.data("original-pos");
+                     $window.css({ width: pos.width, height: pos.height, top: pos.top, left: pos.left, transition: 'all 0.3s ease-out' });
+                     $window.data("original-pos", null);
+                     $window.resizable('enable').draggable('enable');
+                     setTimeout(() => $window.css('transition', ''), 300);
+                 } else { // Maximize
+                     $window.data("original-pos", { width: $window.outerWidth() + 'px', height: $window.outerHeight() + 'px', top: $window.css('top'), left: $window.css('left') });
+                     $window.css({ width: "100%", height: `calc(100vh - ${topOffset}px - ${bottomOffset}px - 5px)`, top: topOffset + 'px', left: "0", transition: 'all 0.3s ease-out' });
+                     $window.resizable('disable').draggable('disable');
+                     setTimeout(() => $window.css('transition', ''), 300);
+                 }
+            });
+
+            // Bring window to front on mousedown
+            $(document).on('mousedown', '.window', function() {
+                bringToFront($(this));
+            });
+        }
+
+        // --- Dock Interaction ---
+        function setupDockInteraction() {
+            $(document).on('click', '.dock-item', function() {
+                 const windowId = $(this).data("window");
+                 openWindow(windowId, $(this));
+            });
+        }
+
+        // --- Music Player Logic ---
+        function setupMusicPlayer() {
+            let isPlaying = false;
+            const player = document.getElementById("music-player");
+            const $playButton = $("#music-play");
+            if (!$playButton.length) return; // Exit if button doesn't exist
+
+            $playButton.off('click').on('click', function() {
+                 if (isPlaying) {
+                     player.pause();
+                     $playButton.text("▶").attr('title', 'Play');
+                 } else {
+                     player.play().then(() => {
+                        $playButton.text("⏸").attr('title', 'Pause');
+                     }).catch(error => { console.error("Audio play failed:", error); isPlaying = false; });
+                 }
+                 isPlaying = !isPlaying;
+            });
+            player.onended = function() { $playButton.text("▶").attr('title', 'Play'); isPlaying = false; };
+        }
+
+        // --- App Store Chrome Installation Logic ---
+        function setupAppStore() {
+            const $installButton = $("#install-chrome");
+            if (!$installButton.length) return; // Exit if button doesn't exist
+
+            $installButton.off('click').on('click', function() {
+                if (chromeInstalled) {
+                    openWindow('chrome-window', $(this));
+                    setTimeout(() => $("#app-store-window").fadeOut(100), 200);
+                    setActiveDockItem('chrome-window');
+                    return;
+                }
+                const $button = $(this), $progressContainer = $("#chrome-progress"), $progressBar = $("#chrome-loading-bar"), $completeMessage = $("#chrome-complete");
+                $button.prop("disabled", true).text("INSTALLING"); $progressContainer.show(); $progressBar.css("width", "0%"); $completeMessage.hide();
+                let progress = 0;
+                const interval = setInterval(function() {
+                     progress += Math.random() * 15 + 5; progress = Math.min(progress, 100);
+                     $progressBar.css("width", progress + "%");
+                     if (progress >= 100) {
+                         clearInterval(interval); $progressContainer.hide(); $completeMessage.show();
+                         $button.text("OPEN").prop("disabled", false); chromeInstalled = true;
+                         const chromeApp = { name: "Chrome", icon: "C", iconClass: "chrome", windowId: "chrome-window", dockOrder: 9 };
+                         // Add Chrome if it doesn't exist in the data array yet
+                         if (!initialApps.some(app => app.name === "Chrome")) {
+                             initialApps.push(chromeApp);
+                             if ($('.dock-item.chrome').length === 0) addDockItem(chromeApp);
+                             if ($('#desktop-apps .app-icon.chrome').length === 0) addDesktopApp(chromeApp);
+                             if ($('#finder-content .app-icon.chrome').length === 0) addFinderApp(chromeApp);
+                         }
+                         setupAppStore(); // Re-attach handler for OPEN state
+                     }
+                }, 200);
+            });
+        }
+
+        // --- App Creation Functions ---
+        function addDockItem(app) {
+            if (!app || !app.dockOrder) return;
+            const $dockContainer = $('.dock-container');
+            let iconContent = app.icon;
+            if (app.iconClass === 'chrome') iconContent = '<div class="chrome-inner"></div>';
+            const $dockItem = $(`<div class="dock-item ${app.iconClass}" data-window="${app.windowId || ''}" title="${app.name}">${iconContent}</div>`);
+            // Simple append, assumes sorting happened earlier or Chrome goes last
+             $dockContainer.append($dockItem);
+        }
+
+        function createAppElement(app, location) {
+            const appContainerClass = location === 'desktop' ? 'desktop-app' : 'finder-app';
+            const uniqueId = `${location}-app-${app.name.replace(/\s+/g, '-')}-${Date.now()}`;
+            const $appContainer = $('<div></div>').addClass(appContainerClass).attr('id', uniqueId).attr('tabindex', 0).data('app-data', app);
+            let iconContent = app.icon;
+            if (app.iconClass === 'chrome') iconContent = '<div class="chrome-inner"></div>';
+            const $appIcon = $('<div></div>').addClass(`app-icon ${app.iconClass}`).html(iconContent).attr('data-window', app.windowId);
+            const $appName = $('<div></div>').addClass('app-name').text(app.name).attr('data-app-name', app.name);
+            $appContainer.append($appIcon).append($appName);
+
+            // Attach events using delegation on parent containers later if needed, or directly
+            $appIcon.off('dblclick').on('dblclick', function(e) { e.stopPropagation(); openWindow($(this).data('window'), $(this).closest(`.${appContainerClass}`)); });
+            $appContainer.off('contextmenu').on('contextmenu', function(e) { e.preventDefault(); contextTarget = $(this); showContextMenu(e.pageX, e.pageY); });
+            $appContainer.off('click').on('click', function(e){ e.stopPropagation(); $(this).focus(); });
+            return $appContainer;
+        }
+
+        function addDesktopApp(app) { if (!app || !app.name) return; $('#desktop-apps').append(createAppElement(app, 'desktop')); }
+        function addFinderApp(app) { if (!app || !app.name) return; $('#finder-content').append(createAppElement(app, 'finder')); }
+
+        // --- Context Menu Logic ---
+        function showContextMenu(x, y) {
+            hideContextMenu(); const $menu = $('#context-menu'); if (!contextTarget) return;
+            const targetData = contextTarget.data('app-data');
+            // Show/hide 'Open' based on if the app has a window
+            if (!targetData || !targetData.windowId) $menu.find('.open-item').hide(); else $menu.find('.open-item').show();
+            const menuWidth = $menu.outerWidth(), menuHeight = $menu.outerHeight(), bodyWidth = $('body').width(), bodyHeight = $('body').height();
+            if (x + menuWidth > bodyWidth) x = bodyWidth - menuWidth - 5; if (y + menuHeight > bodyHeight) y = bodyHeight - menuHeight - 5;
+            if (x < 0) x = 5; if (y < 0) y = 5;
+            $menu.css({ top: y + 'px', left: x + 'px' }).show();
+        }
+        function hideContextMenu() { $('#context-menu').hide(); contextTarget = null; }
+
+        function setupContextMenu() {
+            // Use delegation for context menu items
+             $(document).on('click.contextMenu', function(e) { if (!$(e.target).closest('#context-menu').length) hideContextMenu(); });
+             $('#context-menu').on('click', '.open-item', function() { if (contextTarget) openWindow(contextTarget.find('.app-icon').data('window'), contextTarget); hideContextMenu(); });
+             $('#context-menu').on('click', '.rename-item', function() {
+                 if (contextTarget) {
+                     const $appName = contextTarget.find('.app-name'), currentName = $appName.text();
+                     $appName.attr('contenteditable', true).addClass('editing').focus(); document.execCommand('selectAll', false, null);
+                     const finishRename = function() {
+                         const newName = $appName.text().trim(); $appName.attr('contenteditable', false).removeClass('editing');
+                         if (newName && newName !== currentName) {
+                             $appName.text(newName).attr('data-app-name', newName);
+                             const appData = contextTarget.data('app-data'); if (appData) appData.name = newName;
+                             $(`.dock-item[data-window="${appData?.windowId}"]`).attr('title', newName);
+                         } else $appName.text(currentName);
+                         $appName.off('.rename');
+                     };
+                     $appName.on('blur.rename keydown.rename', function(e) { if (e.key === 'Enter') { e.preventDefault(); finishRename(); } else if (e.key === 'Escape') { $appName.text(currentName); finishRename(); } });
+                 } hideContextMenu();
+             });
+             $('#context-menu').on('click', '.delete-item', function() {
+                 if (contextTarget) {
+                     const appData = contextTarget.data('app-data');
+                     contextTarget.fadeOut(200, function() { $(this).remove(); });
+                     if (appData) {
+                         $(`#desktop-apps .desktop-app, #finder-content .finder-app`).filter(function() { return $(this).data('app-data') === appData; }).remove();
+                         $(`.dock-item[data-window="${appData.windowId}"]`).remove();
+                         $(`.dock-item[title="${appData.name}"]`).remove();
+                         const appIndex = initialApps.findIndex(app => app === appData); if (appIndex > -1) initialApps.splice(appIndex, 1);
+                     }
+                 } hideContextMenu();
+             });
+        }
+
+        // --- Theme Switching Logic ---
+        function setTheme(mode) {
+            const $body = $('body');
+            const lightWallpaper = 'url("https://wallpapercave.com/wp/wp9139426.jpg")';
+            const darkWallpaper = 'url("https://wallpapercave.com/wp/wp7728680.jpg")';
+
+            if (mode === 'dark') {
+                $body.addClass('dark-mode').css('background-image', darkWallpaper);
+                $('#dark-mode-button').addClass('active');
+                $('#light-mode-button').removeClass('active');
+            } else { // Default to light
+                $body.removeClass('dark-mode').css('background-image', lightWallpaper);
+                $('#light-mode-button').addClass('active');
+                $('#dark-mode-button').removeClass('active');
+            }
+        }
+
+        function setupThemeSwitcher() {
+            // Use delegation in case prefs window is recreated
+            $(document).on('click', '.mode-button', function() {
+                const selectedMode = $(this).data('mode');
+                if (selectedMode === 'auto') return;
+                setTheme(selectedMode);
+            });
+             // Set initial theme (light) after boot sequence sets wallpaper
+             // setTheme('light'); // Theme is set when UI becomes visible
+        }
+
+
+        // --- Start the Boot Sequence ---
+        startBootSequence();
+
+        // Note: initializeMainUI() is called from within startBootSequence()
+        // after the boot screen fades out.
+
+    }); // End $(document).ready
+  </script>
+ </body>
+ </html>
